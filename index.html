@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0f1a2b">
+<title>Waiver Scout</title>
+<style>
+:root{--bg:#eef2f8;--card:#fff;--ink:#13203a;--mute:#5d6f8c;--line:#d9e1ee;--up:#0f9d63;--accent:#1f5fff;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1a2b;--card:#17263d;--ink:#e8eef9;--mute:#8da0bd;--line:#243652;--up:#3ddc97;--accent:#6c9bff;color-scheme:dark}}
+*,*::before,*::after{box-sizing:inherit}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-text-size-adjust:100%}
+header{padding:20px 16px 12px;max-width:560px;margin:0 auto}
+h1{margin:0 0 14px;font-size:30px;line-height:1.1;font-weight:800;letter-spacing:-.02em}
+form{display:flex;gap:8px}
+input,select,button{font:inherit;color:inherit;border-radius:12px;border:1px solid var(--line);background:var(--card);padding:12px 14px;min-height:46px}
+input{flex:1;min-width:0}
+button{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:700;cursor:pointer}
+button.ghost{background:transparent;color:var(--accent);border-color:var(--line)}
+select{width:100%;margin-top:8px}
+:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+main{max-width:560px;margin:0 auto;padding:4px 16px 32px}
+.hint,.status{color:var(--mute);margin:12px 0}
+.err{color:#d6364c;font-weight:600}
+.bar{display:flex;align-items:center;justify-content:space-between;margin:10px 0 12px;font-weight:700}
+.bar button{padding:8px 12px;min-height:38px;font-size:14px}
+.card{background:var(--card);border:1px solid var(--line);border-left:5px solid var(--c);border-radius:14px;margin-bottom:12px;overflow:hidden}
+.card[data-p=QB]{--c:#ff7a8a}.card[data-p=RB]{--c:#2fc98a}.card[data-p=WR]{--c:#4a9dff}.card[data-p=TE]{--c:#ffae42}.card[data-p=K]{--c:#a98bff}.card[data-p=DEF]{--c:#8da0bd}
+.top,li{display:flex;align-items:center;gap:10px;padding:12px 14px}
+.top{border-bottom:1px solid var(--line)}
+.chip{min-width:38px;text-align:center;font-weight:800;font-size:13px;padding:4px 0;border-radius:8px;background:var(--c);color:#0f1a2b}
+.who{flex:1;min-width:0}
+.who b{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.who small{display:flex;flex-wrap:wrap;gap:4px 10px;color:var(--mute);font-size:13px}
+.pts{font-weight:800;font-variant-numeric:tabular-nums;text-align:right;min-width:44px}
+.pts small{display:block;color:var(--mute);font-weight:500;font-size:12px}
+ul{list-style:none;margin:0;padding:0}
+li+li{border-top:1px solid var(--line)}
+.up{color:var(--up);font-weight:800;font-variant-numeric:tabular-nums}
+.tag{color:#d6364c}
+footer{max-width:560px;margin:0 auto;padding:0 16px 28px;color:var(--mute);font-size:13px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Waiver scout</h1>
+  <form id="f">
+    <input id="u" placeholder="Sleeper username" autocapitalize="off" autocomplete="username" autocorrect="off" required>
+    <button>Find leagues</button>
+  </form>
+  <select id="l" aria-label="League" hidden></select>
+</header>
+<main id="out"><p class="hint">Enter your Sleeper username to see free agents projected to beat the players on your roster.</p></main>
+<footer>Data from Sleeper. Projections follow your league’s scoring (PPR, half PPR or standard).</footer>
+<script>
+const API='https://api.sleeper.app/v1', PRJ='https://api.sleeper.com', POS=['QB','RB','WR','TE','K','DEF'];
+const $=s=>document.querySelector(s), out=$('#out'), sel=$('#l');
+const esc=s=>String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+const j=async u=>{const r=await fetch(u);if(!r.ok)throw new Error('HTTP '+r.status);return r.json()};
+const say=(t,c='status')=>{out.innerHTML=`<p class="${c}">${esc(t)}</p>`};
+let uid=null, state=null, leagues=[];
+
+async function players(){
+  const c=store.get('ws_players');
+  if(c){try{const o=JSON.parse(c);if(Date.now()-o.t<864e5)return o.d}catch(e){}}
+  const raw=await j(API+'/players/nfl'), d={};
+  for(const id in raw){const p=raw[id];if(!POS.includes(p.position))continue;
+    d[id]={n:p.full_name||[p.first_name,p.last_name].filter(Boolean).join(' ')||id,p:p.position,t:p.team,i:p.injury_status,a:p.status}}
+  store.set('ws_players',JSON.stringify({t:Date.now(),d}));return d;
+}
+
+$('#f').addEventListener('submit',async e=>{
+  e.preventDefault();const name=$('#u').value.trim();if(!name)return;
+  say('Finding your leagues…');sel.hidden=true;
+  try{
+    const user=await j(API+'/user/'+encodeURIComponent(name));
+    if(!user||!user.user_id)return say('No Sleeper account found for that username. Check the spelling and try again.','err');
+    uid=user.user_id;store.set('ws_user',name);
+    state=await j(API+'/state/nfl');
+    leagues=await j(`${API}/user/${uid}/leagues/nfl/${state.season}`);
+    if(!leagues.length)return say(`No NFL leagues found for ${state.season}.`,'err');
+    sel.innerHTML=leagues.map((l,i)=>`<option value="${i}">${esc(l.name)}</option>`).join('');
+    const last=leagues.findIndex(l=>l.league_id===store.get('ws_league'));
+    sel.value=last<0?0:last;sel.hidden=leagues.length<2;
+    analyze();
+  }catch(err){say('Couldn’t reach Sleeper. Check your connection and try again.','err')}
+});
+sel.addEventListener('change',analyze);
+
+async function analyze(){
+  const lg=leagues[sel.value];store.set('ws_league',lg.league_id);
+  say('Scanning the waiver wire…');
+  try{
+    const week=Math.max(1,state.week||1), rec=(lg.scoring_settings||{}).rec||0;
+    const key=rec>=1?'pts_ppr':rec>=.5?'pts_half_ppr':'pts_std';
+    const q=POS.map(p=>'position[]='+p).join('&');
+    const [db,rosters,proj,stats,trend]=await Promise.all([
+      players(),j(`${API}/league/${lg.league_id}/rosters`),
+      j(`${PRJ}/projections/nfl/${state.season}/${week}?season_type=regular&${q}&order_by=${key}`).catch(()=>null),
+      j(`${PRJ}/stats/nfl/${state.season}?season_type=regular&${q}&order_by=${key}`).catch(()=>null),
+      j(`${API}/players/nfl/trending/add?lookback_hours=48&limit=50`).catch(()=>[])]);
+    const mine=rosters.find(r=>r.owner_id===uid||(r.co_owners||[]).includes(uid));
+    if(!mine)return say('Couldn’t find your team in this league.','err');
+    if(!proj)return say('Sleeper’s projections aren’t available right now. Try again in a few minutes.','err');
+    const rows=x=>Array.isArray(x)?x:Object.values(x||{});
+    const pts={},ppg={};
+    rows(proj).forEach(r=>{const id=r.player_id||(r.player||{}).player_id,v=(r.stats||{})[key];if(id&&v>0)pts[id]=v});
+    rows(stats).forEach(r=>{const id=r.player_id||(r.player||{}).player_id,s=r.stats||{};if(id&&s.gp>0&&s[key]>0)ppg[id]=s[key]/s.gp});
+    const hot={};(trend||[]).forEach(t=>hot[t.player_id]=t.count);
+    const taken=new Set();
+    rosters.forEach(r=>[...(r.players||[]),...(r.reserve||[]),...(r.taxi||[])].forEach(x=>taken.add(x)));
+    const bad=new Set(['Out','IR','PUP','Sus','Doubtful']);
+    const fa={};POS.forEach(p=>fa[p]=[]);
+    for(const id in db){const p=db[id];
+      if(taken.has(id)||!p.t||p.a!=='Active'||bad.has(p.i)||!pts[id])continue;
+      fa[p.p].push({id,n:p.n,t:p.t,pts:pts[id],ppg:ppg[id],hot:hot[id]})}
+    POS.forEach(p=>fa[p].sort((a,b)=>b.pts-a.pts));
+    const skip=new Set([...(mine.reserve||[]),...(mine.taxi||[])]),starters=new Set(mine.starters||[]);
+    const cards=[];
+    (mine.players||[]).forEach(id=>{const p=db[id];if(!p||skip.has(id))return;
+      const mp=pts[id]||0,c=fa[p.p].filter(x=>x.pts>mp+.5).slice(0,3);
+      if(c.length)cards.push({me:{n:p.n,p:p.p,t:p.t,i:p.i,pts:mp,s:starters.has(id)},c,d:c[0].pts-mp})});
+    cards.sort((a,b)=>b.d-a.d);
+    out.innerHTML=`<div class="bar"><span>${cards.length} possible ${cards.length===1?'upgrade':'upgrades'} for week ${week}</span><button class="ghost" id="r">Refresh</button></div>`+
+      (cards.map(card).join('')||'<p class="hint">No free agents are projected to beat your roster this week.</p>');
+    $('#r').onclick=analyze;
+  }catch(err){say('Something went wrong loading this league. Try again in a moment.','err')}
+}
+
+function card(k){const m=k.me;
+  return `<article class="card" data-p="${m.p}"><div class="top"><span class="chip">${m.p}</span>
+  <div class="who"><b>${esc(m.n)}</b><small><span>${esc(m.t||'No team')}</span><span>${m.s?'Starter':'Bench'}</span>${m.i?`<span class="tag">${esc(m.i)}</span>`:''}${m.pts?'':'<span>No projection</span>'}</small></div>
+  <div class="pts">${m.pts?m.pts.toFixed(1):'—'}<small>proj</small></div></div><ul>`+
+  k.c.map(x=>`<li><div class="who"><b>${esc(x.n)}</b><small><span>${esc(x.t)}</span>${x.ppg?`<span>${x.ppg.toFixed(1)} per game</span>`:''}${x.hot?`<span>${x.hot} adds</span>`:''}</small></div><span class="up">+${(x.pts-m.pts).toFixed(1)}</span><span class="pts">${x.pts.toFixed(1)}</span></li>`).join('')+`</ul></article>`}
+
+const saved=store.get('ws_user');if(saved){$('#u').value=saved;$('#f').requestSubmit()}
+</script>
+</body>
+</html>
